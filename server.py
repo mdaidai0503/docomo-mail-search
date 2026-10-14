@@ -63,17 +63,32 @@ def parse_mail(raw, uid, validity, internaldate=''):
 
 class PublicError(Exception): pass
 
+def docomo_tls_context():
+    context = ssl.create_default_context()
+    context.minimum_version = ssl.TLSVersion.TLSv1_2
+    context.maximum_version = ssl.TLSVersion.TLSv1_2
+    # Official docomo IMAP specification 2.2.1. Keep certificate verification
+    # and OpenSSL security level; add RSA/AES suites absent from Python defaults.
+    context.set_ciphers('ECDHE-RSA-AES128-GCM-SHA256:ECDHE-RSA-AES256-GCM-SHA384:'
+                        'ECDHE-RSA-AES128-SHA256:AES128-SHA256:AES256-SHA256:'
+                        'ECDHE-RSA-AES128-SHA:ECDHE-RSA-AES256-SHA:AES128-SHA:AES256-SHA')
+    return context
+
 def connection():
     try:
-        context = ssl.create_default_context()
-        context.minimum_version = ssl.TLSVersion.TLSv1_2
+        context = docomo_tls_context()
         client = imaplib.IMAP4_SSL(HOST, 993, ssl_context=context, timeout=25)
     except socket.gaierror:
         raise PublicError('接続先の名前解決に失敗しました（DNS）。Renderからドコモへの通信を確認する必要があります。') from None
     except (TimeoutError, socket.timeout):
         raise PublicError('ドコモ受信サーバーへの接続が時間切れです（IMAP接続）。パスワード認証前に失敗しています。') from None
-    except ssl.SSLError:
-        raise PublicError('ドコモ受信サーバーとの暗号化接続に失敗しました（TLS）。') from None
+    except ssl.SSLCertVerificationError as e:
+        code = e.verify_code if isinstance(e.verify_code, int) else 0
+        raise PublicError(f'ドコモ受信サーバーの証明書確認に失敗しました（TLS証明書・コード{code}）。') from None
+    except ssl.SSLError as e:
+        reason = getattr(e, 'reason', '') or ''
+        reason = reason if re.fullmatch(r'[A-Z0-9_]{1,80}', reason) else 'UNKNOWN'
+        raise PublicError('ドコモ受信サーバーとの暗号化接続に失敗しました（TLS：'+reason+'）。') from None
     except OSError:
         raise PublicError('Renderからドコモ受信サーバーに接続できません（TCP接続）。') from None
     try:
