@@ -1,0 +1,19 @@
+services:
+  - type: web
+    name: docomo-mail-import
+    runtime: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn server:app --bind 0.0.0.0:$PORT --workers 1 --threads 2 --timeout 180 --access-logfile /dev/null
+    healthCheckPath: /health
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.10
+      - key: DOCOMO_USER
+        sync: false
+      - key: DOCOMO_PASSWORD
+        sync: false
+      - key: IMPORT_TOKEN
+        generateValue: true
+      - key: ALLOWED_ORIGIN
+        value: https://mdaidai0503.github.io
