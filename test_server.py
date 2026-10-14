@@ -72,4 +72,29 @@ class Tests(unittest.TestCase):
     def test_internaldate_uses_japan_day(self):
         r=server.parse_mail(RAW,12,99,'13-Oct-2026 23:30:00 +0000')
         self.assertEqual(r['date'],'2026-10-14')
+    @patch.dict(os.environ,ENV)
+    def test_connection_timeout_diagnosis(self):
+        with patch.object(server.imaplib,'IMAP4_SSL',side_effect=TimeoutError):
+            status, result = self.request('/api/sync', {})
+        self.assertTrue(status[0].startswith('400'))
+        self.assertIn('パスワード認証前', result['error'])
+    @patch.dict(os.environ,ENV)
+    def test_dns_diagnosis(self):
+        with patch.object(server.imaplib,'IMAP4_SSL',side_effect=server.socket.gaierror):
+            status, result = self.request('/api/sync', {})
+        self.assertIn('DNS', result['error'])
+    @patch.dict(os.environ,ENV)
+    def test_auth_diagnosis_no_secret(self):
+        fake=FakeIMAP()
+        fake.login=lambda *args: (_ for _ in ()).throw(server.imaplib.IMAP4.error('private test-secret'))
+        with patch.object(server.imaplib,'IMAP4_SSL',return_value=fake):
+            status, result=self.request('/api/sync', {})
+        self.assertIn('IMAP認証', result['error']); self.assertNotIn('test-secret',result['error'])
+    @patch.dict(os.environ,ENV)
+    def test_internal_error_diagnosis_no_secret(self):
+        with patch.object(server,'sync',side_effect=RuntimeError('private mail content')):
+            with patch.object(server.sys,'stderr',io.StringIO()) as log:
+                status,result=self.request('/api/sync', {})
+        self.assertIn('RuntimeError',result['error'])
+        self.assertNotIn('private',result['error']+log.getvalue())
 if __name__=='__main__': unittest.main()
