@@ -97,4 +97,18 @@ class Tests(unittest.TestCase):
                 status,result=self.request('/api/sync', {})
         self.assertIn('RuntimeError',result['error'])
         self.assertNotIn('private',result['error']+log.getvalue())
+    def test_docomo_tls_keeps_certificate_verification(self):
+        c=server.docomo_tls_context()
+        self.assertEqual(c.verify_mode,server.ssl.CERT_REQUIRED)
+        self.assertTrue(c.check_hostname)
+        self.assertEqual(c.minimum_version,server.ssl.TLSVersion.TLSv1_2)
+        self.assertEqual(c.maximum_version,server.ssl.TLSVersion.TLSv1_2)
+        self.assertIn('AES128-SHA256',[x['name'] for x in c.get_ciphers()])
+        self.assertGreaterEqual(c.security_level,2)
+    @patch.dict(os.environ,ENV)
+    def test_tls_reason(self):
+        err=server.ssl.SSLError(1,'handshake');err.reason='SSLV3_ALERT_HANDSHAKE_FAILURE'
+        with patch.object(server.imaplib,'IMAP4_SSL',side_effect=err):
+            status,result=self.request('/api/sync',{})
+        self.assertIn('SSLV3_ALERT_HANDSHAKE_FAILURE',result['error'])
 if __name__=='__main__': unittest.main()
