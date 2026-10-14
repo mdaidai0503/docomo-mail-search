@@ -105,6 +105,8 @@ class Tests(unittest.TestCase):
         self.assertEqual(c.maximum_version,server.ssl.TLSVersion.TLSv1_2)
         self.assertIn('AES128-SHA256',[x['name'] for x in c.get_ciphers()])
         self.assertGreaterEqual(c.security_level,2)
+        self.assertTrue(c.options & server.ssl.OP_LEGACY_SERVER_CONNECT)
+        self.assertTrue(c.options & server.ssl.OP_NO_RENEGOTIATION)
     @patch.dict(os.environ,ENV)
     def test_tls_reason(self):
         err=server.ssl.SSLError(1,'handshake');err.reason='SSLV3_ALERT_HANDSHAKE_FAILURE'
