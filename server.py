@@ -7,6 +7,9 @@ import json
 import os
 import re
 import ssl
+import socket
+import sys
+import traceback
 from datetime import date, timedelta
 from email import policy
 from email.parser import BytesParser
@@ -61,9 +64,33 @@ def parse_mail(raw, uid, validity, internaldate=''):
 class PublicError(Exception): pass
 
 def connection():
-    client = imaplib.IMAP4_SSL(HOST, 993, ssl_context=ssl.create_default_context(), timeout=25)
     try:
-        client.login(os.environ['DOCOMO_USER'], os.environ['DOCOMO_PASSWORD'])
+        context = ssl.create_default_context()
+        context.minimum_version = ssl.TLSVersion.TLSv1_2
+        client = imaplib.IMAP4_SSL(HOST, 993, ssl_context=context, timeout=25)
+    except socket.gaierror:
+        raise PublicError('接続先の名前解決に失敗しました（DNS）。Renderからドコモへの通信を確認する必要があります。') from None
+    except (TimeoutError, socket.timeout):
+        raise PublicError('ドコモ受信サーバーへの接続が時間切れです（IMAP接続）。パスワード認証前に失敗しています。') from None
+    except ssl.SSLError:
+        raise PublicError('ドコモ受信サーバーとの暗号化接続に失敗しました（TLS）。') from None
+    except OSError:
+        raise PublicError('Renderからドコモ受信サーバーに接続できません（TCP接続）。') from None
+    try:
+        user = os.environ['DOCOMO_USER'].strip()
+        password = os.environ['DOCOMO_PASSWORD'].strip()
+        if not user or not password:
+            raise PublicError('DOCOMO_USER・DOCOMO_PASSWORDが空欄です。Renderの設定を確認してください。')
+        try:
+            user.encode('ascii'); password.encode('ascii')
+        except UnicodeEncodeError:
+            raise PublicError('接続設定に全角文字が含まれています。ユーザーIDとIMAP専用パスワードを半角で入力してください。') from None
+        try:
+            client.login(user, password)
+        except imaplib.IMAP4.error:
+            raise PublicError('ドコモの認証に失敗しました（IMAP認証）。ユーザーID・IMAP専用パスワード・dアカウント利用設定を確認してください。') from None
+        except TimeoutError:
+            raise PublicError('ドコモの認証応答が時間切れです（IMAP認証）。') from None
         if client.select('INBOX', readonly=True)[0] != 'OK': raise PublicError('受信箱を開けませんでした。')
         value = client.response('UIDVALIDITY')[1]
         validity = int(value[0]) if value and value[0] else 0
@@ -179,4 +206,12 @@ def app(environ, start_response):
     except PublicError as e: return reply('400 Bad Request', {'error': str(e)})
     except (ValueError, TypeError, json.JSONDecodeError): return reply('400 Bad Request', {'error': '入力を確認してください。'})
     except imaplib.IMAP4.error: return reply('502 Bad Gateway', {'error': 'ドコモメールへの接続に失敗しました。dアカウントID・IMAP専用パスワード・dアカウント利用設定を確認してください。'})
-    except Exception: return reply('502 Bad Gateway', {'error': '取得できませんでした。時間をおいて再度お試しください。'})
+    except TimeoutError:
+        return reply('504 Gateway Timeout', {'error': 'ドコモ接続後のメール取得が時間切れです（IMAP取得）。'})
+    except OSError:
+        return reply('502 Bad Gateway', {'error': 'メール取得中に通信が切れました（IMAP通信）。'})
+    except Exception as e:
+        # Log only type and stack locations; exception text may contain private mail.
+        frames = traceback.extract_tb(e.__traceback__)
+        print('import_error', type(e).__name__, [(f.name, f.lineno) for f in frames], file=sys.stderr)
+        return reply('502 Bad Gateway', {'error': 'メール解析の内部処理で失敗しました（'+type(e).__name__+'）。このエラー表示をお知らせください。'})
