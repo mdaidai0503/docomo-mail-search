@@ -72,6 +72,10 @@ def docomo_tls_context():
     context.set_ciphers('ECDHE-RSA-AES128-GCM-SHA256:ECDHE-RSA-AES256-GCM-SHA384:'
                         'ECDHE-RSA-AES128-SHA256:AES128-SHA256:AES256-SHA256:'
                         'ECDHE-RSA-AES128-SHA:ECDHE-RSA-AES256-SHA:AES128-SHA:AES256-SHA')
+    # Limited to the fixed docomo server. Permit legacy initial handshake,
+    # but prohibit renegotiation; retain certificate and hostname validation.
+    context.options |= ssl.OP_LEGACY_SERVER_CONNECT
+    context.options |= ssl.OP_NO_RENEGOTIATION
     return context
 
 def connection():
